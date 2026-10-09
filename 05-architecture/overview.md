@@ -1,223 +1,223 @@
-# Arquitectura — Simple Stock Flow
+# Architecture — Simple Stock Flow
 
-> Reconstruida **desde** `spec/data-model.md` (en adelante, *el modelo*). Primera pasada (orden 1 del reto); el cierre (orden 6) está en la §10.
-> **Cómo se cita:** `[§2.3]` = sección del modelo · `[FK-3]`, `[Q9]`, `[D-04]`, `[T-20]`, `[ADR-002]`, `[DP-03]`, `[Art. X]` = identificadores que el modelo define y que aquí no se redefinen.
-> **Supuesto (S-nn)** = no sale del modelo; la lista completa está en la §9.
+> Reconstructed **from** `spec/data-model.md` (hereafter, *the model*). First pass (challenge order 1); the closure (order 6) is in §10.
+> **How to cite:** `[§2.3]` = section of the model · `[FK-3]`, `[Q9]`, `[D-04]`, `[T-20]`, `[ADR-002]`, `[DP-03]`, `[Art. X]` = identifiers that the model defines and that are not redefined here.
+> **Assumption (S-nn)** = does not come from the model; the complete list is in §9.
 
-## 1. Cómo se leyó el modelo
+## 1. How the model was read
 
-1. Toda regla lleva una de tres marcas: **motor**, **solo dominio** o **pendiente (T-xx)** [«Cómo se lee este documento»]. Se respetan tal cual: una regla «solo dominio» no se presenta como garantizada.
-2. Si el documento contradice al motor, **gana el motor** [encabezado; Art. X]. No hay acceso al motor desde este repositorio, así que cuando el modelo se contradice a sí mismo se usa la marca fechada más recientemente (§13, 2026-09-20) y la contradicción se registra (DM-n, §10.3).
-3. Lo que el modelo no dice no se afirma: se marca como supuesto.
+1. Every rule carries one of three marks: **engine**, **domain only** or **pending (T-xx)** [«How to read this document»]. They are respected as is: a «domain only» rule is not presented as guaranteed.
+2. If the document contradicts the engine, **the engine wins** [header; Art. X]. There is no access to the engine from this repository, so when the model contradicts itself, the most recently dated mark is used (§13, 2026-09-20) and the contradiction is recorded (DM-n, §10.3).
+3. What the model does not say is not asserted: it is marked as an assumption.
 
-## 2. Estilo arquitectónico
+## 2. Architectural style
 
-| Decisión | Qué dice el modelo | Fuente |
+| Decision | What the model says | Source |
 |---|---|---|
-| Arquitectura hexagonal (puertos y adaptadores) | «Por diseño del hexágono»; puerto de hash; puerto de lectura del reporte; el adaptador de persistencia es donde vive el mapeo; rutas `src/domain/` y `src/adapters/outbound/persistence/Configurations/` | [§2.5], [§1 Reporte, D-06], [§0], [§12] |
-| Dominio rico con agregados (DDD táctico) | Tres raíces de agregado y una entidad de referencia | [§2.1–§2.5] |
-| Un solo sistema, una sola base, un solo esquema | «El esquema `sales` agrupa el sistema entero» → monolito modular (S-02) | [§3] |
-| Persistencia | PostgreSQL 16, EF Core (propiedades sombra, filtro global, migraciones), C# | [encabezado], [§2.2], [§3.2], [§0] |
-| Binarios de imagen fuera de la base | Almacenamiento externo; la base guarda solo una clave opaca | [§1 Imagen, D-08], [§7.1] |
-| El esquema lo poseen solo las migraciones | Nada más escribe DDL | [§3.2, ADR-001] |
+| Hexagonal architecture (ports and adapters) | «By design of the hexagon»; hash port; report read port; the persistence adapter is where the mapping lives; paths `src/domain/` and `src/adapters/outbound/persistence/Configurations/` | [§2.5], [§1 Report, D-06], [§0], [§12] |
+| Rich domain with aggregates (tactical DDD) | Three aggregate roots and one reference entity | [§2.1–§2.5] |
+| A single system, a single database, a single schema | «The `sales` schema groups the entire system» → modular monolith (S-02) | [§3] |
+| Persistence | PostgreSQL 16, EF Core (shadow properties, global filter, migrations), C# | [header], [§2.2], [§3.2], [§0] |
+| Image binaries outside the database | External storage; the database stores only an opaque key | [§1 Image, D-08], [§7.1] |
+| The schema is owned only by migrations | Nothing else writes DDL | [§3.2, ADR-001] |
 
-## 3. Vista de piezas
+## 3. Parts view
 
 ```mermaid
 flowchart LR
-  subgraph ENT[Adaptadores de entrada]
-    API[API HTTP con autenticacion por token]
+  subgraph ENT[Inbound adapters]
+    API[HTTP API with token authentication]
   end
-  subgraph APP[Aplicacion]
-    UC[Casos de uso]
-    DR[DateRange - objeto de valor]
+  subgraph APP[Application]
+    UC[Use cases]
+    DR[DateRange - value object]
   end
-  subgraph DOM[Dominio - src/domain]
+  subgraph DOM[Domain - src/domain]
     P[Product]
-    S[Sale con SaleItem]
+    S[Sale with SaleItem]
     U[User]
-    C[Category - solo lectura]
+    C[Category - read only]
   end
-  subgraph SAL[Adaptadores de salida]
-    REPO[Persistencia EF Core - PostgreSQL esquema sales]
-    RPT[Lectura del reporte]
-    HASH[Hash de clave]
-    IMG[Almacenamiento de imagenes]
+  subgraph SAL[Outbound adapters]
+    REPO[EF Core persistence - PostgreSQL sales schema]
+    RPT[Report read]
+    HASH[Key hash]
+    IMG[Image storage]
   end
   API --> UC
   UC --> DR
   UC --> DOM
-  DOM -- puertos de repositorio --> REPO
-  UC -- puerto de lectura --> RPT
-  UC -- puerto de hash --> HASH
-  UC -- puerto de imagenes --> IMG
+  DOM -- repository ports --> REPO
+  UC -- read port --> RPT
+  UC -- hash port --> HASH
+  UC -- image port --> IMG
 ```
 
-La dependencia de código apunta siempre hacia el dominio; los adaptadores implementan los puertos.
+The code dependency always points towards the domain; the adapters implement the ports.
 
-## 4. Agregados
+## 4. Aggregates
 
-| Agregado | Raíz | Dentro | Objetos de valor | Protege | Fuente |
+| Aggregate | Root | Inside | Value objects | Protects | Source |
 |---|---|---|---|---|---|
-| Catálogo | `Product` | — | `Money`, clave de imagen | R-01…R-07 | [§2.2] |
-| Ventas | `Sale` | `SaleItem` (constructor `internal`: solo `Sale.AddItem` lo crea) | `Money`, `Quantity` | R-08…R-17 | [§2.3], [§2.4] |
-| Identidad | `User` | — | rol (`Roles`) | R-18…R-22 | [§2.5] |
-| Referencia | `Category`: **no es raíz**, sin ciclo de vida, repositorio de solo lectura | — | — | R-23 | [§2.1] |
+| Catalog | `Product` | — | `Money`, image key | R-01…R-07 | [§2.2] |
+| Sales | `Sale` | `SaleItem` (`internal` constructor: only `Sale.AddItem` creates it) | `Money`, `Quantity` | R-08…R-17 | [§2.3], [§2.4] |
+| Identity | `User` | — | role (`Roles`) | R-18…R-22 | [§2.5] |
+| Reference | `Category`: **not a root**, no lifecycle, read-only repository | — | — | R-23 | [§2.1] |
 
-- Los objetos de valor **no tienen tabla**: viven en la fila de su dueño [§2, D-07].
-- Entre agregados se referencia por **identidad de la raíz**: `product→category`, `sale_item→product`, `sale→user` [§5, cardinalidades].
-- No existen tablas de reporte, auditoría ni contadores [§2].
+- Value objects **do not have a table**: they live in their owner's row [§2, D-07].
+- Between aggregates, referencing is done by **root identity**: `product→category`, `sale_item→product`, `sale→user` [§5, cardinalities].
+- There are no report, audit, or counter tables [§2].
 
-## 5. Puertos
+## 5. Ports
 
-| Puerto | Dirección | Qué ofrece | Patrón | Fuente |
+| Port | Direction | What it offers | Pattern | Source |
 |---|---|---|---|---|
-| Repositorio de `Product` | salida | buscar (texto parcial, categoría, solo activos, orden por nombre, paginado y con conteo); por id; **por lote de ids activos** (lectura previa a escribir stock); guardar con testigo de concurrencia | Q1, Q2, Q3 | [§6.1], [D-04] |
-| Repositorio de `Category` | salida, **solo lectura** | listar por nombre; por id. Ningún método crea, renombra ni borra | Q4, Q5 | [§2.1], [§6.1] |
-| Repositorio de `Sale` | salida | venta con sus líneas; ventas por rango (paginado, con conteo); guardar venta confirmada. Sin editar ni borrar | Q6, Q7 | [§6.1], [§2.3] |
-| Ventas por rango **sin paginar** | — | **Retirar del puerto**: no tiene consumidor | Q8 | [§6.1] |
-| Repositorio de `User` | salida | por nombre exacto (cada inicio de sesión) | Q10 | [§6.1] |
-| Puerto de lectura del reporte | salida | agregación por producto sobre un rango, **calculada en el motor**, que devuelve un modelo de lectura | Q9 | [§1], [D-06], [§6.1] |
-| Puerto de hash | salida | producir y verificar el hash; único lugar que ve la clave en claro | — | [§2.5], [§9.2], [D-09] |
-| Almacenamiento de imágenes (S-10) | salida | guardar y borrar binarios por clave opaca | — | [§1], [§7.1], [D-08] |
-| API HTTP | entrada | autenticación por token y autorización por rol; el contrato de la API no está en el modelo (S-11) | — | [§13 D-3], [§3], [§12] |
+| `Product` repository | outbound | search (partial text, category, active only, order by name, paginated and with count); by id; **by batch of active ids** (read prior to writing stock); save with concurrency token | Q1, Q2, Q3 | [§6.1], [D-04] |
+| `Category` repository | outbound, **read only** | list by name; by id. No method creates, renames, or deletes | Q4, Q5 | [§2.1], [§6.1] |
+| `Sale` repository | outbound | sale with its lines; sales by range (paginated, with count); save confirmed sale. No editing or deleting | Q6, Q7 | [§6.1], [§2.3] |
+| Sales by range **unpaginated** | — | **Remove from port**: has no consumer | Q8 | [§6.1] |
+| `User` repository | outbound | by exact name (each login) | Q10 | [§6.1] |
+| Report read port | outbound | aggregation by product over a range, **calculated in the engine**, returning a read model | Q9 | [§1], [D-06], [§6.1] |
+| Hash port | outbound | produce and verify the hash; only place that sees the cleartext key | — | [§2.5], [§9.2], [D-09] |
+| Image storage (S-10) | outbound | save and delete binaries by opaque key | — | [§1], [§7.1], [D-08] |
+| HTTP API | inbound | token authentication and role authorization; the API contract is not in the model (S-11) | — | [§13 D-3], [§3], [§12] |
 
-## 6. Dónde vive cada regla
+## 6. Where each rule lives
 
-| R | Regla | Dónde vive | Marca | Fuente |
+| R | Rule | Where it lives | Mark | Source |
 |---|---|---|---|---|
-| R-01 | Nombre de producto obligatorio, no vacío, recortado | `Product.Rename`; el motor solo exige `NOT NULL` | solo dominio | [§2.2] |
-| R-02 | `price > 0` | `Product.ChangePrice` (`Money` admite 0) | solo dominio → T-20 | [§2.2], [§4] |
-| R-03 | `stock >= 0` tras cualquier operación | `Product.Withdraw`/`Restock` + `ck_product_stock_non_negative` | **motor** | [§2.2], [§4] |
-| R-04 | Retirar más stock del disponible falla | `Product.Withdraw` (regla de proceso, no es un `CHECK`) | solo dominio | [§2.2] |
-| R-05 | Categoría obligatoria y existente | `FK_product_category_category_id` (FK-1, RESTRICT) | **motor** | [§2.2], [§5] |
-| R-06 | Sin imagen = `NULL`, nunca cadena vacía | `Product.AttachImage` | solo dominio | [§2.2] |
-| R-07 | Baja lógica, nunca borrado físico | `deleted_at` + filtro global | **motor** (T-09; ver DM-4) | [§2.2], [D-03], [§13 D-1] |
-| R-08 | La venta registra quién la realiza | constructor de `Sale`; `NOT NULL` | solo dominio | [§2.3] |
-| R-09 | Al menos una línea para confirmarse | `Sale.EnsureConfirmable` (exigiría un disparador diferido) | solo dominio | [§2.3] |
-| R-10 | Un producto no se repite en una venta | `Sale.AddItem` + índice único `(sale_id, product_id)` | dominio y **motor** (T-20; DM-5) | [§2.3], [§4] |
-| R-11 | Descontar stock y añadir la línea son **una sola operación** | `Sale.AddItem` llama a `Product.Withdraw` | solo dominio | [§2.3] |
-| R-12 | Venta inmutable | no existe puerto de edición ni de borrado | solo dominio (por ausencia) | [§2.3], [§7.1] |
-| R-13 | La línea exige un producto | `NOT NULL` + FK-3 (RESTRICT) | **motor** (T-20; DM-5) | [§2.4], [§5] |
-| R-14 | `quantity > 0` | constructor de `Quantity` | solo dominio → T-20 | [§2.4] |
-| R-15 | Nombre y precio de la línea congelados | `Sale.AddItem` copia de `Product` | solo dominio | [§2.4], [§1] |
-| R-16 | Nombre de categoría congelado, **sin FK a propósito** | `sale_item.category_name NOT NULL` | **motor** (T-11; DM-3) | [§2.4], [D-06], [ADR-004] |
-| R-17 | La línea no existe fuera de su venta | FK-2 (CASCADE) + `sale_id NOT NULL` | **motor** (T-20; DM-5) | [§2.4], [§5] |
-| R-18 | Usuario obligatorio y único | constructor + `IX_user_username` | **motor** (unicidad) | [§2.5] |
-| R-19 | Usuario en minúsculas y recortado | `User.NormalizeUsername` | solo dominio → T-20 | [§2.5] |
-| R-20 | Hash obligatorio y no vacío | constructor de `User`; `NOT NULL` | solo dominio | [§2.5] |
-| R-21 | `role` en `('admin','seller')` | `Roles.IsValid` | solo dominio → T-20 | [§2.5], [§9.2] |
-| R-22 | El dominio nunca ve la clave en claro | puerto de hash | por diseño del hexágono | [§2.5], [D-09] |
-| R-23 | Categoría: nombre obligatorio, no vacío y único | `Category.Rename` (solo dominio → T-20); `IX_category_name` (motor) | mixta | [§2.1] |
-| R-24 | Total y subtotal se calculan, no se almacenan | `Sale.Total`, `SaleItem.Subtotal`; sin columna | dominio | [§1], [Art. VII] |
-| R-25 | Monomoneda; sin columna de moneda | ninguna tabla la tiene; la guarda en `Sale.AddItem` está **pendiente (T-05)** | diseño | [§3], [§2.3], [D-05] |
-| R-26 | Importe a 2 decimales, `AwayFromZero` | `Money` y `numeric(18,2)`, que cambian **juntos** | dominio + motor | [§2.2] |
-| R-27 | Rango de fechas: el fin no puede ser anterior al inicio | objeto de valor de la capa de aplicación, sin tabla | aplicación | [§1] |
-| R-28 | Ninguna columna con `DEFAULT` | los valores los pone el dominio | motor (por ausencia) | [§3] |
-| R-29 | Marcas de tiempo `timestamptz`, servidor en UTC | tipo de columna | motor | [§3] |
-| R-30 | Al borrar un binario: anular `image_key`, confirmar, y **después** borrar el binario; sin atomicidad | aplicación + almacenamiento externo | procedimiento | [§7.1] |
-| R-31 | El `admin` inicial lo crea el arranque con credenciales de entorno; nadie otorga `admin` en ejecución | arranque de la aplicación + API | fuera del esquema | [§9.2], [§11 H-3], [D-10], [DP-04] |
-| R-32 | El reporte agrupa por el valor congelado de categoría | consulta del puerto de lectura | consulta | [§11.1], [ADR-004] |
-| R-33 | El reporte no se desglosa por vendedor | puerto de lectura | decisión | [DP-02], [§7.1] |
+| R-01 | Mandatory product name, not empty, trimmed | `Product.Rename`; the engine only requires `NOT NULL` | domain only | [§2.2] |
+| R-02 | `price > 0` | `Product.ChangePrice` (`Money` allows 0) | domain only → T-20 | [§2.2], [§4] |
+| R-03 | `stock >= 0` after any operation | `Product.Withdraw`/`Restock` + `ck_product_stock_non_negative` | **engine** | [§2.2], [§4] |
+| R-04 | Withdrawing more stock than available fails | `Product.Withdraw` (process rule, not a `CHECK`) | domain only | [§2.2] |
+| R-05 | Mandatory and existing category | `FK_product_category_category_id` (FK-1, RESTRICT) | **engine** | [§2.2], [§5] |
+| R-06 | No image = `NULL`, never an empty string | `Product.AttachImage` | domain only | [§2.2] |
+| R-07 | Logical deletion, never physical deletion | `deleted_at` + global filter | **engine** (T-09; see DM-4) | [§2.2], [D-03], [§13 D-1] |
+| R-08 | The sale records who performs it | `Sale` constructor; `NOT NULL` | domain only | [§2.3] |
+| R-09 | At least one line to be confirmed | `Sale.EnsureConfirmable` (would require a deferred trigger) | domain only | [§2.3] |
+| R-10 | A product is not repeated in a sale | `Sale.AddItem` + unique index `(sale_id, product_id)` | domain and **engine** (T-20; DM-5) | [§2.3], [§4] |
+| R-11 | Deducting stock and adding the line are **a single operation** | `Sale.AddItem` calls `Product.Withdraw` | domain only | [§2.3] |
+| R-12 | Immutable sale | there is no editing or deleting port | domain only (by absence) | [§2.3], [§7.1] |
+| R-13 | The line requires a product | `NOT NULL` + FK-3 (RESTRICT) | **engine** (T-20; DM-5) | [§2.4], [§5] |
+| R-14 | `quantity > 0` | `Quantity` constructor | domain only → T-20 | [§2.4] |
+| R-15 | Line name and price frozen | `Sale.AddItem` copies from `Product` | domain only | [§2.4], [§1] |
+| R-16 | Category name frozen, **no FK on purpose** | `sale_item.category_name NOT NULL` | **engine** (T-11; DM-3) | [§2.4], [D-06], [ADR-004] |
+| R-17 | The line does not exist outside its sale | FK-2 (CASCADE) + `sale_id NOT NULL` | **engine** (T-20; DM-5) | [§2.4], [§5] |
+| R-18 | Mandatory and unique user | constructor + `IX_user_username` | **engine** (uniqueness) | [§2.5] |
+| R-19 | User in lowercase and trimmed | `User.NormalizeUsername` | domain only → T-20 | [§2.5] |
+| R-20 | Mandatory and not empty hash | `User` constructor; `NOT NULL` | domain only | [§2.5] |
+| R-21 | `role` in `('admin','seller')` | `Roles.IsValid` | domain only → T-20 | [§2.5], [§9.2] |
+| R-22 | The domain never sees the cleartext key | hash port | by design of the hexagon | [§2.5], [D-09] |
+| R-23 | Category: mandatory, not empty and unique name | `Category.Rename` (domain only → T-20); `IX_category_name` (engine) | mixed | [§2.1] |
+| R-24 | Total and subtotal are calculated, not stored | `Sale.Total`, `SaleItem.Subtotal`; no column | domain | [§1], [Art. VII] |
+| R-25 | Single currency; no currency column | no table has it; the guard in `Sale.AddItem` is **pending (T-05)** | design | [§3], [§2.3], [D-05] |
+| R-26 | Amount to 2 decimals, `AwayFromZero` | `Money` and `numeric(18,2)`, which change **together** | domain + engine | [§2.2] |
+| R-27 | Date range: the end cannot be earlier than the start | application layer value object, no table | application | [§1] |
+| R-28 | No column with `DEFAULT` | values are set by the domain | engine (by absence) | [§3] |
+| R-29 | `timestamptz` timestamps, server in UTC | column type | engine | [§3] |
+| R-30 | When deleting a binary: nullify `image_key`, commit, and **then** delete the binary; no atomicity | application + external storage | procedure | [§7.1] |
+| R-31 | The initial `admin` is created on startup with environment credentials; nobody grants `admin` at runtime | application startup + API | outside the schema | [§9.2], [§11 H-3], [D-10], [DP-04] |
+| R-32 | The report groups by the frozen category value | read port query | query | [§11.1], [ADR-004] |
+| R-33 | The report is not broken down by seller | read port | decision | [DP-02], [§7.1] |
 
-**Deuda declarada:** las cinco reglas «solo dominio» de valor (R-02, R-14, R-19, R-21 y el no vacío de R-23) bajan al motor en T-20 [§4]. Criterio del modelo: si una restricción salta, *algo escribió fuera del adaptador* [ADR-002, §2].
+**Declared debt:** the five «domain only» value rules (R-02, R-14, R-19, R-21 and the not empty of R-23) drop to the engine in T-20 [§4]. Model criteria: if a constraint fails, *something wrote outside the adapter* [ADR-002, §2].
 
-## 7. Consistencia y concurrencia
+## 7. Consistency and concurrency
 
-- **Concurrencia optimista:** `xmin` de Postgres como testigo, expuesto como propiedad sombra (T-10) [§3, D-04].
-- **Última barrera:** `ck_product_stock_non_negative` [§2.2, ADR-002].
-- **Punto de contención:** Q3, la lectura de productos que precede a la escritura de stock [§6.1].
-- **Operación entre dos agregados:** `Sale.AddItem` modifica `Product` y `Sale` como «una sola operación» [R-11]. El modelo no dice cómo se materializa: se asume una transacción de base de datos (S-04) y que, ante un conflicto, la escritura perdedora falla (S-14).
-- **Binarios:** el almacenamiento no participa en la transacción de la base, por eso no se promete atomicidad [R-30].
+- **Optimistic concurrency:** Postgres `xmin` as a token, exposed as a shadow property (T-10) [§3, D-04].
+- **Last barrier:** `ck_product_stock_non_negative` [§2.2, ADR-002].
+- **Contention point:** Q3, the product read that precedes the stock write [§6.1].
+- **Operation between two aggregates:** `Sale.AddItem` modifies `Product` and `Sale` as «a single operation» [R-11]. The model does not say how it materializes: a database transaction is assumed (S-04) and that, in case of a conflict, the losing write fails (S-14).
+- **Binaries:** the storage does not participate in the database transaction, which is why atomicity is not promised [R-30].
 
-## 8. Persistencia, seguridad y privacidad
+## 8. Persistence, security and privacy
 
-- **Esquema `sales`**, cinco tablas en singular: `category`, `product`, `sale`, `sale_item`, `user`. Lo que pasa a singular es la tabla, no el esquema. `user` no necesita comillas porque va cualificado [§0].
-- **Convención de nombres:** lo que genera EF conserva su estilo (`PK_`, `IX_`, `FK_`); lo escrito a mano (los `CHECK`) va en `snake_case`: `ck_{tabla}_{regla}` [§3.1].
-- **Migraciones aplicadas:** cuatro, de `InitialSchema` a `RenameTablesToSingular` [§3.2].
-- **Semilla:** las cinco categorías van en la migración inicial con ids fijos. El administrador inicial **no** se siembra desde SQL [§9.1–§9.2].
-- **Índices:** los de acceso y su estado (existen / faltan) están en [§6.2]. Faltan tres (T-13): el parcial `(category_id, name)`, el de trigramas y el compuesto único con `INCLUDE`. `pg_trgm` la instala la propia migración que crea el índice, nunca `db/init/` [§6.2].
-- **Privacidad atributo por atributo:** `username` es dato personal; `password_hash` es secreto (nunca en logs, respuestas ni errores, y nunca se indexa); no hay datos de cliente final [§7].
+- **`sales` schema**, five singular tables: `category`, `product`, `sale`, `sale_item`, `user`. What goes to singular is the table, not the schema. `user` does not need quotes because it is qualified [§0].
+- **Naming convention:** what EF generates keeps its style (`PK_`, `IX_`, `FK_`); what is handwritten (the `CHECK`s) goes in `snake_case`: `ck_{table}_{rule}` [§3.1].
+- **Applied migrations:** four, from `InitialSchema` to `RenameTablesToSingular` [§3.2].
+- **Seed:** the five categories go in the initial migration with fixed ids. The initial administrator is **not** seeded from SQL [§9.1–§9.2].
+- **Indexes:** the access ones and their state (exist / missing) are in [§6.2]. Three are missing (T-13): the partial `(category_id, name)`, the trigram one and the composite unique with `INCLUDE`. `pg_trgm` is installed by the migration that creates the index itself, never `db/init/` [§6.2].
+- **Privacy attribute by attribute:** `username` is personal data; `password_hash` is a secret (never in logs, responses or errors, and is never indexed); there is no end-customer data [§7].
 
-## 9. Supuestos
+## 9. Assumptions
 
-| S | Supuesto | Por qué es supuesto |
+| S | Assumption | Why it is an assumption |
 |---|---|---|
-| S-01 | Comercio de ferretería/suministros | Solo se infiere de las categorías sembradas [§9.1] |
-| S-02 | Monolito modular: una API y una base | El modelo solo dice que el esquema agrupa el sistema [§3] |
-| S-03 | Matriz de permisos por rol (ver `04-requirements`) | El modelo solo fija el alta de vendedores [§11 H-3, §13 D-3] |
-| S-04 | Registrar una venta es una transacción de base de datos | El modelo dice «una sola operación» [§2.3] |
-| S-05 | Credenciales inválidas: mensaje genérico | El modelo no define el mensaje |
-| S-06 | Los eventos de dominio se derivan de las operaciones | El modelo no define eventos ni los persiste [§2, §8] |
-| S-07 | Reponer stock exige cantidad > 0 | La positividad solo se declara para líneas de venta [§1] |
-| S-08 | No hay reactivar productos ni cambiar rol/editar usuarios | El modelo no define esas operaciones |
-| S-09 | Sin umbrales numéricos de rendimiento | El modelo prioriza por frecuencia, sin cifras [§6.1] |
-| S-10 | Existe un puerto de almacenamiento de imágenes | El modelo habla de «almacenamiento externo» [§1, §7.1] |
-| S-11 | El contrato de la API está fuera del modelo | Vive en `api-contract.md`, no entregado [§12] |
-| S-12 | La venta se construye y se confirma antes de persistirse | Interpretación de «para poder confirmarse» [§2.3] |
-| S-13 | Reporte de un rango sin ventas → resultado vacío | El modelo no lo define |
-| S-14 | Conflicto de concurrencia → la escritura perdedora falla y el cliente reintenta | El modelo no define la respuesta |
-| S-15 | Los indicadores de éxito se derivan de invariantes | El modelo no define métricas de negocio |
+| S-01 | Hardware/supplies store | Only inferred from the seeded categories [§9.1] |
+| S-02 | Modular monolith: one API and one database | The model only says the schema groups the system [§3] |
+| S-03 | Permission matrix by role (see `04-requirements`) | The model only sets the registration of sellers [§11 H-3, §13 D-3] |
+| S-04 | Registering a sale is a database transaction | The model says «a single operation» [§2.3] |
+| S-05 | Invalid credentials: generic message | The model does not define the message |
+| S-06 | Domain events are derived from operations | The model does not define events nor persist them [§2, §8] |
+| S-07 | Restocking requires quantity > 0 | Positivity is only declared for sale lines [§1] |
+| S-08 | There is no reactivating products nor changing role/editing users | The model does not define those operations |
+| S-09 | No numerical performance thresholds | The model prioritizes by frequency, without figures [§6.1] |
+| S-10 | An image storage port exists | The model speaks of «external storage» [§1, §7.1] |
+| S-11 | The API contract is outside the model | Lives in `api-contract.md`, not delivered [§12] |
+| S-12 | The sale is built and confirmed before being persisted | Interpretation of «to be able to be confirmed» [§2.3] |
+| S-13 | Report of a range without sales → empty result | The model does not define it |
+| S-14 | Concurrency conflict → the losing write fails and the client retries | The model does not define the response |
+| S-15 | Success indicators are derived from invariants | The model does not define business metrics |
 
-## 10. Cierre (orden 6): comprobación contra el modelo y contra `01`–`04`
+## 10. Closure (order 6): check against the model and against `01`–`04`
 
-### 10.1 ¿Cada sección del modelo quedó recogida?
+### 10.1 Is each section of the model collected?
 
-| Modelo | Dónde se recoge |
+| Model | Where it is collected |
 |---|---|
-| §0 Nombres | esta §8 |
-| §1 Glosario | `02-domain` §1 |
-| §2 Entidades e invariantes | esta §4 y §6; `02-domain` §3 |
-| §3 Modelo físico | esta §8 |
-| §4 Restricciones | esta §6 |
-| §5 Claves foráneas | esta §6; `02-domain` §5 |
-| §6 Accesos e índices | esta §5 y §8; `04` HU-07…HU-12, RNF-08 |
-| §7 Privacidad y retención | esta §8; `04` RNF-05, RNF-07 |
-| §8 Sin auditoría | `01-context` §4 (fuera de alcance) |
-| §9 Semilla | esta §8; `04` HU-02, HU-08 |
-| §10 Verificación | `04` RNF-09; esta §10.5 |
-| §11 Huecos | `02-domain` §9; `03-product` §8 |
-| §12 Firma y exclusiones | `01-context` §4 |
-| §13 Deuda | esta §10.3 |
+| §0 Names | this §8 |
+| §1 Glossary | `02-domain` §1 |
+| §2 Entities and invariants | this §4 and §6; `02-domain` §3 |
+| §3 Physical model | this §8 |
+| §4 Constraints | this §6 |
+| §5 Foreign keys | this §6; `02-domain` §5 |
+| §6 Accesses and indexes | this §5 and §8; `04` HU-07…HU-12, RNF-08 |
+| §7 Privacy and retention | this §8; `04` RNF-05, RNF-07 |
+| §8 No audit | `01-context` §4 (out of scope) |
+| §9 Seed | this §8; `04` HU-02, HU-08 |
+| §10 Verification | `04` RNF-09; this §10.5 |
+| §11 Gaps | `02-domain` §9; `03-product` §8 |
+| §12 Signature and exclusions | `01-context` §4 |
+| §13 Debt | this §10.3 |
 
-### 10.2 ¿Cada historia tiene agregado y puerto?
+### 10.2 Does each story have an aggregate and port?
 
-| HU | Agregado(s) | Puertos de salida | Patrón |
+| US | Aggregate(s) | Outbound ports | Pattern |
 |---|---|---|---|
-| HU-01 Iniciar sesión | `User` | repositorio `User`, hash | Q10 |
-| HU-02 Alta de vendedores | `User` | repositorio `User`, hash | Q10 |
-| HU-03 Crear producto | `Product`, `Category` | repositorio `Product`, repositorio `Category`, imágenes | Q5 |
-| HU-04 Modificar producto | `Product`, `Category` | repositorio `Product`, repositorio `Category`, imágenes | Q2, Q5 |
-| HU-05 Reponer stock | `Product` | repositorio `Product` | Q2 |
-| HU-06 Dar de baja | `Product` | repositorio `Product`, imágenes | Q2 |
-| HU-07 Buscar productos | `Product` | repositorio `Product` | Q1 |
-| HU-08 Consultar categorías | `Category` | repositorio `Category` | Q4, Q5 |
-| HU-09 Registrar venta | `Sale`, `Product`, `User` | repositorio `Sale`, repositorio `Product` | Q3 |
-| HU-10 Consultar venta | `Sale` | repositorio `Sale` | Q6 |
-| HU-11 Listar ventas | `Sale` | repositorio `Sale` | Q7 |
-| HU-12 Reporte | modelo de lectura | puerto de lectura del reporte | Q9 |
+| HU-01 Login | `User` | `User` repository, hash | Q10 |
+| HU-02 Register sellers | `User` | `User` repository, hash | Q10 |
+| HU-03 Create product | `Product`, `Category` | `Product` repository, `Category` repository, images | Q5 |
+| HU-04 Modify product | `Product`, `Category` | `Product` repository, `Category` repository, images | Q2, Q5 |
+| HU-05 Restock | `Product` | `Product` repository | Q2 |
+| HU-06 Deactivate | `Product` | `Product` repository, images | Q2 |
+| HU-07 Search products | `Product` | `Product` repository | Q1 |
+| HU-08 Consult categories | `Category` | `Category` repository | Q4, Q5 |
+| HU-09 Register sale | `Sale`, `Product`, `User` | `Sale` repository, `Product` repository | Q3 |
+| HU-10 Consult sale | `Sale` | `Sale` repository | Q6 |
+| HU-11 List sales | `Sale` | `Sale` repository | Q7 |
+| HU-12 Report | read model | report read port | Q9 |
 
-**Resultado:** Q1–Q7, Q9 y Q10 tienen consumidor. **Q8 no, y es deliberado** [§6.1]. Ninguna HU pide algo que el modelo excluya.
+**Result:** Q1–Q7, Q9 and Q10 have a consumer. **Q8 does not, and it is deliberate** [§6.1]. No US asks for something that the model excludes.
 
-### 10.3 Discrepancias del modelo (el motor manda; verificar con §10 del modelo)
+### 10.3 Model discrepancies (the engine rules; verify with §10 of the model)
 
-| # | Qué se contradice | Cómo se trata aquí |
+| # | What is contradicted | How it is treated here |
 |---|---|---|
-| DM-1 | Conteo de columnas: «22» en §3, §0 y §12 frente a «21» en §10.1, en el ancla de §8 y en la nota de `xmin` | 21 es la salida literal del 2026-09-19. 22 equivale a 21 + `deleted_at` (T-09, §13 D-1). Se usa 22 como estado actual |
-| DM-2 | `product.category_name` aparece en la tabla `product` de §3, pero DP-03 y §1 limitan `Product` a nombre, precio, stock, categoría e imagen, y §2.4, §5 y §11.1 la ubican en `sale_item` | Se trata como columna de `sale_item`. Se considera un error de colocación del modelo |
-| DM-3 | `sale_item.category_name`: «motor (T-11)» en §2.4, pero «pendiente (T-11)» en la tabla `sale_item` de §3 | Se documenta como motor [§2.4] y se señala. Verificar con la consulta de §10.1 |
-| DM-4 | `deleted_at`: motor en §2.2, §3 y §13 D-1, pero «pendiente T-09» en §6.2, §6.3 y §7.1 | Prevalece §13 (2026-09-20): motor |
-| DM-5 | FK-3, `sale_id NOT NULL` y el compuesto único: motor en §2.3, §2.4, §4 (filas), §5 y §13 D-2; pero «ocho restricciones» en el encabezado de §4, «hoy existen dos» en §5, «falta (T-13)» en §6.2 y salidas de §10 sin ellos. Además, el dueño del compuesto es T-13 en §6.2 y T-20 en §4 | Prevalece §13 D-2: motor. Las salidas de §10 son anteriores al 2026-09-20 y hay que repetirlas |
-| DM-6 | `spec.md` CA-06.1 («una fila por producto») contradice la decisión de §11.1 | **Decisión pendiente del propietario** [§11.1]. HU-12 se redacta con la decisión de §11.1 |
+| DM-1 | Column count: «22» in §3, §0 and §12 versus «21» in §10.1, in the anchor of §8 and in the `xmin` note | 21 is the literal output from 2026-09-19. 22 equals 21 + `deleted_at` (T-09, §13 D-1). 22 is used as the current state |
+| DM-2 | `product.category_name` appears in the `product` table of §3, but DP-03 and §1 limit `Product` to name, price, stock, category and image, and §2.4, §5 and §11.1 place it in `sale_item` | It is treated as a `sale_item` column. It is considered a placement error in the model |
+| DM-3 | `sale_item.category_name`: «engine (T-11)» in §2.4, but «pending (T-11)» in the `sale_item` table of §3 | It is documented as engine [§2.4] and pointed out. Verify with the query of §10.1 |
+| DM-4 | `deleted_at`: engine in §2.2, §3 and §13 D-1, but «pending T-09» in §6.2, §6.3 and §7.1 | §13 (2026-09-20) prevails: engine |
+| DM-5 | FK-3, `sale_id NOT NULL` and the composite unique: engine in §2.3, §2.4, §4 (rows), §5 and §13 D-2; but «eight constraints» in the header of §4, «today there are two» in §5, «missing (T-13)» in §6.2 and outputs of §10 without them. Additionally, the owner of the composite is T-13 in §6.2 and T-20 in §4 | §13 D-2 prevails: engine. The outputs of §10 are prior to 2026-09-20 and must be repeated |
+| DM-6 | `spec.md` CA-06.1 («one row per product») contradicts the decision of §11.1 | **Pending decision from the owner** [§11.1]. HU-12 is written with the decision of §11.1 |
 
-### 10.4 Deuda y pendientes que arrastra la arquitectura
+### 10.4 Debt and pending items carried by the architecture
 
-- **Abiertos:** T-05 (guarda de moneda), T-11 (ver DM-3), T-12 (`sold_by_user_id` y FK-4), T-13 (índices) y T-20 (parcial: faltan los `CHECK` de R-02, R-14, R-19, R-21 y R-23).
-- **Huecos con dueño:** H-2 (binario de imagen huérfano) [§11].
-- **Defecto medido, no corregido:** A-7/DP-01, el desempate del nombre de producto en el reporte [§11.1].
+- **Open:** T-05 (currency guard), T-11 (see DM-3), T-12 (`sold_by_user_id` and FK-4), T-13 (indexes) and T-20 (partial: missing the `CHECK`s for R-02, R-14, R-19, R-21 and R-23).
+- **Gaps with owner:** H-2 (orphan image binary) [§11].
+- **Measured defect, not fixed:** A-7/DP-01, the tie-breaker of the product name in the report [§11.1].
 
-### 10.5 Qué falta para dar la arquitectura por cerrada
+### 10.5 What is missing to consider the architecture closed
 
-1. Repetir las tres consultas de §10 del modelo y reconciliar DM-1…DM-5.
-2. Decisión del propietario sobre DM-6.
-3. Confirmar los supuestos S-03 (permisos), S-04 (transacción) y S-14 (conflicto).
+1. Repeat the three queries from §10 of the model and reconcile DM-1…DM-5.
+2. Owner's decision on DM-6.
+3. Confirm assumptions S-03 (permissions), S-04 (transaction) and S-14 (conflict).
